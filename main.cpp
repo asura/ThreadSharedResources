@@ -1,7 +1,7 @@
-#include "SharedResources.h"
 #include "plog/Log.h"
 #include <iostream>
 #include <ppl.h>
+#include <concurrent_queue.h>
 #include <thread>
 #include <vector>
 using namespace std;
@@ -14,23 +14,31 @@ int main(int argc, char *argv[])
 
 	const auto num_cpus = std::thread::hardware_concurrency();
 
-	SharedResources<int> resources;
+	Concurrency::concurrent_queue<int> resources;
 	for (int i = 0; i < num_cpus; ++i) {
-		resources.Push(i);
+		resources.push(i);
 	}
 
-	std::vector<int> tasks;
+	std::vector<int> numbers;
 	for (int i = 0; i < 100; ++i) {
-		tasks.push_back(i);
+		numbers.push_back(i);
 	}
 	Concurrency::parallel_for_each(
-		tasks.begin(),
-		tasks.end(),
+		numbers.begin(),
+		numbers.end(),
 		[&](int i) {
-			auto resource = resources.Pop();
+			int resource;
+			while (true) {
+				auto success = resources.try_pop(resource);
+				if (success) {
+					break;
+				}
+				LOGE << "empty";
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			}
 			LOGI << i << "," << resource;
 
-			resources.Push(resource);
+			resources.push(resource);
 		});
 
 	LOGI << "END";
