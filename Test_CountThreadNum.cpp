@@ -7,6 +7,49 @@
 #include <vector>
 using namespace std;
 
+class Counter
+{
+	int m_counter;
+	int m_highest;
+	mutable mutex m_mtx;	// constメソッド用にmutable装飾する
+
+public:
+	Counter()
+		: m_counter(0)
+		, m_highest(0)
+	{
+	}
+
+	~Counter() = default;
+
+	void inc()
+	{
+		lock_guard<mutex> lock(m_mtx);
+		++m_counter;
+		if (m_highest < m_counter) {
+			m_highest = m_counter;
+		}
+	}
+
+	void dec()
+	{
+		lock_guard<mutex> lock(m_mtx);
+		--m_counter;
+	}
+
+	int value() const
+	{
+		lock_guard<mutex> lock(m_mtx);
+		return m_counter;
+	}
+
+	int highest() const
+	{
+		lock_guard<mutex> lock(m_mtx);
+		return m_highest;
+	}
+};
+
 void usage(const char* const app_name)
 {
 	LOGE << "引数不正" << endl
@@ -66,12 +109,15 @@ int main(int argc, char *argv[])
 
 	mutex mtx;
 	set<thread::id> thread_ids;
+	Counter counter;
 
 	Concurrency::parallel_for_each(
 		numbers.begin(),
 		numbers.end(),
 		[&](int i) {
+			counter.inc();
 			process(i, mtx, thread_ids);
+			counter.dec();
 		}
 	);
 
@@ -80,21 +126,26 @@ int main(int argc, char *argv[])
 		LOGI << thread_id;
 	}
 
+	LOGI << "highest concurrent counter:" << counter.highest();
+
 	Concurrency::CurrentScheduler::Detach();
 }
 
 // 参考サイト:
 //   https://blogs.msdn.microsoft.com/nativeconcurrency/2009/11/18/concurencyparallel_for-and-concurrencyparallel_for_each/
 //
-// ここのコメント欄にあるような「自身+指定数のスレッド」とはならないことがある。
+// スレッドIDを観測すると「自身+指定数のスレッド」とはならないことがある。
 // (実行するごとに変化することがある)
 //
+// そうではなく同時実行数をカウンタにより観測してみると
+// 指定数+1となっていた。
+//
 // <VS2017@ThinkPad T450(4コア)での実験結果>
-// 指定数 : ユニークスレッドID数
-//      1 : 2
-//      2 : 3
-//      3 : 4～5
-//      4 : 6
-//      5 : 7～8
-//      6 : 8～9
-//      7 : 9～11
+// 指定数 : ユニークスレッドID数 : 最大同時実行数
+//      1 : 2                    : 2
+//      2 : 3                    : 3
+//      3 : 4～5                 : 4
+//      4 : 6                    : 5
+//      5 : 7～8                 : 6
+//      6 : 8～10                : 7
+//      7 : 9～11                : 8
